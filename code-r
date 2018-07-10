@@ -27,10 +27,150 @@ data$weather=as.factor(data$weather)
 data$holiday=as.factor(data$holiday)
 data$workingday=as.factor(data$workingday)
 
+#Feature Engineering,we need aditional variables to use them in modeling.
 # extracting hour from the datetime variable, 12 13 are for place in a string per vector value
 data$hour=substr(data$datetime,12,13)
 data$hour=as.factor(data$hour)
 
+# extracting days of week from datetime
+date=substr(data$datetime,1,10)
+days<-weekdays(as.Date(date))
+data$day=days
+
+
+# extracting year from data
+data$year=substr(data$datetime,1,4)
+data$year=as.factor(data$year)
+
 # 9 and 10-th are for hours, decision is to train on everything up until specified moment than train it on other
 train=data[as.integer(substr(data$datetime,9,10))<20,]
 test=data[as.integer(substr(data$datetime,9,10))>19,]
+
+
+# how does potential prediction varies with different variables
+# these boxplots give important information about the dependent variable with respect to the independent variables
+boxplot(train$registered~train$hour,xlab="hour", ylab="count of users")
+boxplot(train$count~train$hour,xlab="hour", ylab="count of users")
+
+boxplot(train$registered~train$day,xlab="day", ylab="registered users")
+boxplot(train$casual~train$day,xlab="day", ylab="casual users")
+
+boxplot(train$registered~train$weather,xlab="weather", ylab="registered users")
+boxplot(train$casual~train$weather,xlab="weather", ylab="casual users")
+
+boxplot(train$registered~train$temp,xlab="temp", ylab="registered users")
+boxplot(train$casual~train$temp,xlab="temp", ylab="casual users")
+
+boxplot(train$registered~train$year,xlab="year", ylab="registered users")
+boxplot(train$casual~train$year,xlab="year", ylab="casual users")
+
+
+#now we want to see as part of feature engneering how can we divide the data. For that we are going to use rpart as  class tree and plot it
+d=rpart(registered~hour,data=train)
+fancyRpartPlot(d)
+
+#after observing that we can modify our data
+data=rbind(train,test)
+data$dp_reg=0
+data$dp_reg[data$hour<8]=1
+data$dp_reg[data$hour>=22]=2
+data$dp_reg[data$hour>9 & data$hour<18]=3
+data$dp_reg[data$hour==8]=4
+data$dp_reg[data$hour==9]=5
+data$dp_reg[data$hour==20 | data$hour==21]=6
+data$dp_reg[data$hour==19 | data$hour==18]=7
+
+data$dp_cas=0
+data$dp_cas[data$hour<=8]=1
+data$dp_cas[data$hour==9]=2
+data$dp_cas[data$hour>=10 & data$hour<=19]=3
+data$dp_cas[data$hour>19]=4
+
+#analogous thinking with other variable
+f=rpart(registered~temp,data=train)
+fancyRpartPlot(f)
+
+f=rpart(casual~temp,data=train)
+fancyRpartPlot(f)
+
+data$temp_reg=0
+data$temp_reg[data$temp<13]=1
+data$temp_reg[data$temp>=13 & data$temp<23]=2
+data$temp_reg[data$temp>=23 & data$temp<30]=3
+data$temp_reg[data$temp>=30]=4
+
+data$temp_cas=0
+data$temp_cas[data$temp<15]=1
+data$temp_cas[data$temp>=15 & data$temp<23]=2
+data$temp_cas[data$temp>=23 & data$temp<30]=3
+data$temp_cas[data$temp>=30]=4
+
+data$year_part[data$year=='2011']=1
+data$year_part[data$year=='2011' & data$month>3]=2
+data$year_part[data$year=='2011' & data$month>6]=3
+data$year_part[data$year=='2011' & data$month>9]=4
+data$year_part[data$year=='2012']=5
+data$year_part[data$year=='2012' & data$month>3]=6
+data$year_part[data$year=='2012' & data$month>6]=7
+data$year_part[data$year=='2012' & data$month>9]=8
+table(data$year_part)
+
+
+
+# creating another variable day_type which may affect our accuracy as weekends and weekdays are important in deciding rentals
+
+data$day_type=0
+data$day_type[data$holiday==0 & data$workingday==0]="weekend"
+data$day_type[data$holiday==1]="holiday"
+data$day_type[data$holiday==0 & data$workingday==1]="working day"
+ 
+#analog
+data$weekend=0
+data$weekend[data$day=="Sunday" | data$day=="Saturday"]=1
+
+
+# converting all relevant categorical variables into factors to feed to our random forest model
+data$season=as.factor(data$season)
+data$holiday=as.factor(data$holiday)
+data$workingday=as.factor(data$workingday)
+data$weather=as.factor(data$weather)
+data$hour=as.factor(data$hour)
+data$month=as.factor(data$month)
+data$day_part=as.factor(data$dp_cas)
+data$day_type=as.factor(data$dp_reg)
+data$day=as.factor(data$day)
+data$temp_cas=as.factor(data$temp_cas)
+data$temp_reg=as.factor(data$temp_reg)
+
+
+
+
+# log transformation for some skewed variables, which can be seen from their distribution
+train$reg1=train$registered+1
+train$cas1=train$casual+1
+train$logcas=log(train$cas1)
+train$logreg=log(train$reg1)
+test$logreg=0
+test$logcas=0
+
+
+# final model building using random forest
+# note that we build different models for predicting for registered and casual users
+# this was seen as giving best result after a lot of experimentation
+set.seed(123)
+fit1 <- randomForest(logreg ~ hour +workingday+day+holiday+ day_type +temp_reg+humidity+atemp+windspeed+season+weather+dp_reg+weekend+year+year_part, data=train,importance=TRUE, ntree=250)
+
+pred1=predict(fit1,test)
+test$logreg=pred1
+ 
+set.seed(456)
+fit2 <- randomForest(logcas ~hour + day_type+day+humidity+atemp+temp_cas+windspeed+season+weather+holiday+workingday+dp_cas+weekend+year+year_part, data=train,importance=TRUE, ntree=250)
+
+pred2=predict(fit2,test)
+test$logcas=pred2
+ 
+#PREDICTIONS
+test$registered=exp(test$logreg)-1
+test$casual=exp(test$logcas)-1
+test$count=test$casual+test$registered
+s<-data.frame(datetime=test$datetime,count=test$count)
