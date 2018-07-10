@@ -1,0 +1,36 @@
+# required libraries
+library(rpart)
+library(rattle)
+library(rpart.plot)
+library(RColorBrewer)
+library(randomForest)
+
+# train/test sets first sorted in excel 
+train=read.csv("train_bike.csv")
+test=read.csv("test_bike.csv")
+str(train)
+
+# introducing variables in test to combine train and test
+# can also be done by removing the same variables from training data
+test$registered=0
+test$casual=0
+test$count=0
+data=rbind(train,test)
+
+# getting some information about the combined data
+str(data)
+summary(data)
+
+# factoring some variables from numeric
+data$season=as.factor(data$season)
+data$weather=as.factor(data$weather)
+data$holiday=as.factor(data$holiday)
+data$workingday=as.factor(data$workingday)
+
+# extracting hour from the datetime variable, 12 13 are for place in a string per vector value
+data$hour=substr(data$datetime,12,13)
+data$hour=as.factor(data$hour)
+
+# 9 and 10-th are for hours, decision is to train on everything up until specified moment than train it on other
+train=data[as.integer(substr(data$datetime,9,10))<20,]
+test=data[as.integer(substr(data$datetime,9,10))>19,]
